@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Image Enhancer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #080c14;
+      --surface: #0f1623;
+      --border: #1e2d47;
+      --accent: #00d4ff;
+      --accent2: #7c3aed;
+      --accent3: #06ffa5;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --glow: 0 0 24px rgba(0,212,255,0.3);
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Sans JP', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Background grid */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(0,212,255,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,212,255,0.03) 1px, transparent 1px);
+      background-size: 40px 40px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    header {
+      position: relative;
+      z-index: 1;
+      padding: 32px 24px 24px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(0,212,255,0.05) 0%, transparent 100%);
+    }
+
+    header h1 {
+      font-family: 'Orbitron', monospace;
+      font-size: clamp(1.4rem, 4vw, 2.4rem);
+      font-weight: 900;
+      letter-spacing: 0.1em;
+      background: linear-gradient(135deg, var(--accent), var(--accent3));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      text-shadow: none;
+      filter: drop-shadow(0 0 12px rgba(0,212,255,0.5));
+    }
+
+    header p {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      letter-spacing: 0.05em;
+    }
+
+    .badge {
+      display: inline-block;
+      margin-top: 10px;
+      padding: 3px 12px;
+      border: 1px solid var(--accent2);
+      border-radius: 20px;
+      font-size: 0.7rem;
+      color: var(--accent2);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    main {
+      position: relative;
+      z-index: 1;
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 32px 16px;
+    }
+
+    /* Upload Zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 16px;
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      background: var(--surface);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .upload-zone::before {
+      content: '';
+      position: absolute;
+      inset: -2px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2), var(--accent3));
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      z-index: -1;
+    }
+
+    .upload-zone:hover, .upload-zone.drag-over {
+      border-color: var(--accent);
+      box-shadow: var(--glow);
+    }
+
+    .upload-zone:hover::before, .upload-zone.drag-over::before {
+      opacity: 0.1;
+    }
+
+    .upload-icon {
+      font-size: 3rem;
+      margin-bottom: 12px;
+      display: block;
+    }
+
+    .upload-zone h2 {
+      font-family: 'Orbitron', monospace;
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--accent);
+      margin-bottom: 8px;
+    }
+
+    .upload-zone p {
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    #fileInput { display: none; }
+
+    /* Settings */
+    .settings-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 20px;
+      align-items: center;
+    }
+
+    .setting-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .setting-group label {
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+    }
+
+    select, input[type="range"] {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      outline: none;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+
+    select:hover, select:focus {
+      border-color: var(--accent);
+    }
+
+    /* Process Button */
+    .btn-process {
+      margin-left: auto;
+      padding: 12px 32px;
+      border: none;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      color: #fff;
+      font-family: 'Orbitron', monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 20px rgba(0,212,255,0.25);
+      flex-shrink: 0;
+    }
+
+    .btn-process:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 32px rgba(0,212,255,0.4);
+    }
+
+    .btn-process:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* Progress */
+    .progress-wrap {
+      margin-top: 16px;
+      display: none;
+    }
+
+    .progress-wrap.show { display: block; }
+
+    .progress-bar-bg {
+      height: 4px;
+      background: var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--accent), var(--accent3));
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 8px var(--accent);
+    }
+
+    .progress-label {
+      font-size: 0.78rem;
+      color: var(--accent);
+      margin-top: 6px;
+      font-family: 'Orbitron', monospace;
+      letter-spacing: 0.06em;
+    }
+
+    /* Result */
+    .result-section {
+      display: none;
+      margin-top: 32px;
+    }
+
+    .result-section.show { display: block; }
+
+    .result-section h3 {
+      font-family: 'Orbitron', monospace;
+      font-size: 0.9rem;
+      color: var(--accent3);
+      letter-spacing: 0.1em;
+      margin-bottom: 16px;
+      text-transform: uppercase;
+    }
+
+    /* Comparison Slider */
+    .comparison-wrap {
+      position: relative;
+      border-radius: 12px;
+      overflow: hidden;
+      cursor: ew-resize;
+      user-select: none;
+      border: 1px solid var(--border);
+      max-height: 70vh;
+    }
+
+    .comparison-wrap img {
+      display: block;
+      width: 100%;
+      max-height: 70vh;
+      object-fit: contain;
+      background: #000;
+    }
+
+    .comparison-after {
+      position: absolute;
+      top: 0; left: 0;
+      width: 50%;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    .comparison-after img {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      /* will be overridden by JS */
+    }
+
+    .slider-line {
+      position: absolute;
+      top: 0; bottom: 0;
+      left: 50%;
+      width: 3px;
+      background: var(--accent);
+      box-shadow: 0 0 12px var(--accent);
+      transform: translateX(-50%);
+      cursor: ew-resize;
+    }
+
+    .slider-handle {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 40px; height: 40px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 20px rgba(0,212,255,0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #000;
+      font-size: 1rem;
+      font-weight: bold;
+    }
+
+    .label-before, .label-after {
+      position: absolute;
+      top: 12px;
+      padding: 3px 10px;
+      border-radius: 6px;
+      font-size: 0.72rem;
+      font-family: 'Orbitron', monospace;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .label-before { left: 12px; background: rgba(0,0,0,0.7); color: var(--muted); border: 1px solid var(--border); }
+    .label-after  { right: 12px; background: rgba(0,212,255,0.15); color: var(--accent); border: 1px solid var(--accent); }
+
+    /* Info row */
+    .info-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .info-chip {
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 0.78rem;
+      color: var(--muted);
+      background: var(--surface);
+    }
+
+    .info-chip span {
+      color: var(--accent3);
+      font-weight: 700;
+    }
+
+    /* Download */
+    .btn-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 16px;
+      padding: 12px 28px;
+      border: 1px solid var(--accent3);
+      border-radius: 10px;
+      background: rgba(6,255,165,0.08);
+      color: var(--accent3);
+      font-family: 'Orbitron', monospace;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-decoration: none;
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+
+    .btn-download:hover {
+      background: rgba(6,255,165,0.18);
+      box-shadow: 0 0 20px rgba(6,255,165,0.25);
+      transform: translateY(-2px);
+    }
+
+    /* Status log */
+    .log {
+      margin-top: 12px;
+      padding: 12px 16px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.78rem;
+      color: var(--muted);
+      font-family: monospace;
+      min-height: 36px;
+    }
+
+    .log .success { color: var(--accent3); }
+    .log .warn    { color: #f59e0b; }
+    .log .err     { color: #ef4444; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      .settings-bar { flex-direction: column; align-items: stretch; }
+      .btn-process { margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>⚡ AI IMAGE ENHANCER</h1>
+  <p>ESRGAN ベース超解像エンジン — ぼかし除去 ＆ 高画質化</p>
+  <span class="badge">Powered by TensorFlow.js + UpscalerJS</span>
+</header>
+
+<main>
+  <!-- Upload -->
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept="image/*" />
+    <span class="upload-icon">🖼️</span>
+    <h2>画像をドロップ または クリックして選択</h2>
+    <p>PNG / JPG / WEBP 対応 · ファイルはローカル処理のみ（サーバー送信なし）</p>
+  </div>
+
+  <!-- Settings -->
+  <div class="settings-bar">
+    <div class="setting-group">
+      <label>アップスケール倍率</label>
+      <select id="scaleSelect">
+        <option value="2">× 2</option>
+        <option value="3">× 3</option>
+        <option value="4" selected>× 4</option>
+      </select>
+    </div>
+
+    <div class="setting-group">
+      <label>エンジン</label>
+      <select id="modelSelect">
+        <option value="@upscalerjs/esrgan-slim">ESRGAN Slim（高速）</option>
+        <option value="@upscalerjs/esrgan-medium" selected>ESRGAN Medium（バランス）</option>
+        <option value="@upscalerjs/default-model">Default（汎用）</option>
+      </select>
+    </div>
+
+    <button class="btn-process" id="btnProcess" disabled>🚀 高画質化 START</button>
+  </div>
+
+  <!-- Progress -->
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill" id="progressFill"></div>
+    </div>
+    <div class="progress-label" id="progressLabel">モデル読み込み中...</div>
+  </div>
+
+  <!-- Log -->
+  <div class="log" id="log">待機中...</div>
+
+  <!-- Result -->
+  <div class="result-section" id="resultSection">
+    <h3>📊 BEFORE / AFTER 比較</h3>
+
+    <div class="comparison-wrap" id="compWrap">
+      <img id="imgBefore" src="" alt="Before" />
+      <div class="comparison-after" id="compAfter">
+        <img id="imgAfter" src="" alt="After" style="width:100%" />
+      </div>
+      <div class="slider-line" id="sliderLine">
+        <div class="slider-handle">⇔</div>
+      </div>
+      <span class="label-before">BEFORE</span>
+      <span class="label-after">AI ENHANCED</span>
+    </div>
+
+    <div class="info-row">
+      <div class="info-chip">元サイズ: <span id="origSize">—</span></div>
+      <div class="info-chip">出力サイズ: <span id="outSize">—</span></div>
+      <div class="info-chip">処理時間: <span id="procTime">—</span></div>
+    </div>
+
+    <a class="btn-download" id="btnDownload" href="#" download="enhanced.png">
+      ⬇ ダウンロード（PNG）
+    </a>
+  </div>
+</main>
+
+<!-- Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/upscaler@1.0.0-beta.18/dist/browser/umd/upscaler.min.js"></script>
+<script>
+(function () {
+  const uploadZone = document.getElementById('uploadZone');
+  const fileInput  = document.getElementById('fileInput');
+  const btnProcess = document.getElementById('btnProcess');
+  const progressWrap = document.getElementById('progressWrap');
+  const progressFill = document.getElementById('progressFill');
+  const progressLabel = document.getElementById('progressLabel');
+  const log = document.getElementById('log');
+  const resultSection = document.getElementById('resultSection');
+  const imgBefore = document.getElementById('imgBefore');
+  const imgAfter  = document.getElementById('imgAfter');
+  const compWrap  = document.getElementById('compWrap');
+  const compAfter = document.getElementById('compAfter');
+  const sliderLine = document.getElementById('sliderLine');
+  const btnDownload = document.getElementById('btnDownload');
+  const origSizeEl = document.getElementById('origSize');
+  const outSizeEl  = document.getElementById('outSize');
+  const procTimeEl = document.getElementById('procTime');
+  const scaleSelect = document.getElementById('scaleSelect');
+  const modelSelect = document.getElementById('modelSelect');
+
+  let originalFile = null;
+  let upscaler = null;
+
+  function setLog(msg, type = '') {
+    log.innerHTML = `<span class="${type}">${msg}</span>`;
+  }
+
+  function setProgress(pct, label) {
+    progressFill.style.width = pct + '%';
+    progressLabel.textContent = label;
+  }
+
+  // Upload Zone
+  uploadZone.addEventListener('click', () => fileInput.click());
+  uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+  uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+  uploadZone.addEventListener('drop', e => {
+    e.preventDefault();
+    uploadZone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
+
+  function handleFile(file) {
+    if (!file.type.startsWith('image/')) { setLog('画像ファイルを選択してください', 'err'); return; }
+    originalFile = file;
+    const url = URL.createObjectURL(file);
+    imgBefore.src = url;
+    imgAfter.src = '';
+    resultSection.classList.remove('show');
+    btnProcess.disabled = false;
+    setLog(`✅ ${file.name} を読み込みました（${(file.size/1024).toFixed(0)} KB）`, 'success');
+  }
+
+  // Process
+  btnProcess.addEventListener('click', async () => {
+    if (!originalFile) return;
+    btnProcess.disabled = true;
+    progressWrap.classList.add('show');
+    resultSection.classList.remove('show');
+
+    try {
+      setProgress(5, 'モデル初期化中...');
+      setLog('⚙️ TensorFlow.js エンジン起動中...', 'warn');
+
+      const modelPkg = modelSelect.value;
+      const scale = parseInt(scaleSelect.value);
+
+      // Build model config dynamically
+      // UpscalerJS uses npm-style model imports via CDN
+      // Use CDN URL for model
+      const modelMap = {
+        '@upscalerjs/esrgan-slim':   'https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@1.0.0-beta.18/dist/browser/esrgan-slim.min.js',
+        '@upscalerjs/esrgan-medium': 'https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-medium@1.0.0-beta.18/dist/browser/esrgan-medium.min.js',
+        '@upscalerjs/default-model': 'https://cdn.jsdelivr.net/npm/@upscalerjs/default-model@1.0.0-beta.18/dist/browser/default-model.min.js',
+      };
+
+      // Dynamically load model script
+      await loadScript(modelMap[modelPkg], 'upscalerModel');
+
+      setProgress(20, 'モデル読み込み中...');
+      setLog('📦 AIモデルをダウンロード中...', 'warn');
+
+      // Get the model from global scope (loaded by CDN script)
+      const modelGlobal = window['ESRGANSlim'] || window['ESRGANMedium'] || window['DefaultModel'];
+
+      upscaler = new Upscaler({ model: modelGlobal || undefined });
+
+      setProgress(40, '画像処理中...');
+      setLog('🔬 超解像処理を実行中... (数秒〜数分かかる場合があります)', 'warn');
+
+      const imgEl = new Image();
+      imgEl.crossOrigin = 'anonymous';
+      imgEl.src = URL.createObjectURL(originalFile);
+      await imgEl.decode();
+
+      origSizeEl.textContent = `${imgEl.naturalWidth} × ${imgEl.naturalHeight} px`;
+
+      const t0 = performance.now();
+
+      // Upscale with progress callback
+      const result = await upscaler.upscale(imgEl, {
+        patchSize: 64,
+        padding: 2,
+        progress: (pct) => {
+          const p = 40 + Math.round(pct * 55);
+          setProgress(p, `超解像処理中... ${Math.round(pct * 100)}%`);
+        }
+      });
+
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      setProgress(100, '完了！');
+
+      // result is a canvas or base64 string
+      let dataUrl;
+      if (typeof result === 'string') {
+        dataUrl = result;
+      } else if (result instanceof HTMLCanvasElement) {
+        dataUrl = result.toDataURL('image/png');
+      } else {
+        // If it's a tensor or other format
+        dataUrl = result;
+      }
+
+      imgAfter.src = dataUrl;
+      imgAfter.onload = () => {
+        outSizeEl.textContent = `${imgAfter.naturalWidth} × ${imgAfter.naturalHeight} px`;
+      };
+      procTimeEl.textContent = `${elapsed} 秒`;
+      btnDownload.href = dataUrl;
+      btnDownload.download = 'enhanced_' + (originalFile.name || 'image.png').replace(/\.[^.]+$/, '') + '.png';
+
+      resultSection.classList.add('show');
+      setupComparison();
+      setLog(`✅ 高画質化完了！ ${elapsed}秒で処理しました`, 'success');
+
+    } catch (err) {
+      console.error(err);
+      setLog('❌ エラー: ' + err.message, 'err');
+      setProgress(0, 'エラーが発生しました');
+    } finally {
+      btnProcess.disabled = false;
+      progressWrap.classList.remove('show');
+    }
+  });
+
+  function loadScript(src, id) {
+    return new Promise((resolve, reject) => {
+      if (document.getElementById(id)) { resolve(); return; }
+      const s = document.createElement('script');
+      s.id = id;
+      s.src = src;
+      s.onload = resolve;
+      s.onerror = () => reject(new Error('スクリプト読み込み失敗: ' + src));
+      document.head.appendChild(s);
+    });
+  }
+
+  // Comparison Slider
+  function setupComparison() {
+    let dragging = false;
+    const move = (clientX) => {
+      const rect = compWrap.getBoundingClientRect();
+      let pct = (clientX - rect.left) / rect.width;
+      pct = Math.max(0.02, Math.min(0.98, pct));
+      compAfter.style.width = pct * 100 + '%';
+      sliderLine.style.left = pct * 100 + '%';
+      // Stretch after image to show correct portion
+      imgAfter.style.width = (1 / pct * 100) + '%';
+    };
+
+    compWrap.addEventListener('mousedown', e => { dragging = true; move(e.clientX); });
+    document.addEventListener('mouseup', () => dragging = false);
+    document.addEventListener('mousemove', e => { if (dragging) move(e.clientX); });
+
+    compWrap.addEventListener('touchstart', e => { dragging = true; move(e.touches[0].clientX); }, { passive: true });
+    document.addEventListener('touchend', () => dragging = false);
+    document.addEventListener('touchmove', e => { if (dragging) move(e.touches[0].clientX); }, { passive: true });
+  }
+})();
+</script>
+</body>
+</html>
