@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI Image Enhancer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;700&family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#060a10" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="AI Enhancer" />
+  <link rel="apple-touch-icon" href="enh-apple-touch-icon.png" />
+  <link rel="icon" type="image/png" href="enh-icon-192.png" />
+  <style>
+    :root {
+      --bg:#060a10;--surface:#0d1520;--surface2:#111d2e;--border:#1a2f4a;
+      --accent:#00c8f8;--accent2:#6d28d9;--accent3:#00ff9d;
+      --text:#dde8f5;--muted:#4a6080;
+      --glow:0 0 28px rgba(0,200,248,.28);--glow3:0 0 20px rgba(0,255,157,.25);
+    }
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    body{background:var(--bg);color:var(--text);font-family:'Noto Sans JP',sans-serif;min-height:100vh}
+    body::before{content:'';position:fixed;inset:0;
+      background-image:linear-gradient(rgba(0,200,248,.025) 1px,transparent 1px),
+        linear-gradient(90deg,rgba(0,200,248,.025) 1px,transparent 1px);
+      background-size:36px 36px;pointer-events:none;z-index:0}
+    header{position:relative;z-index:1;padding:28px 20px 22px;text-align:center;
+      border-bottom:1px solid var(--border);
+      background:linear-gradient(180deg,rgba(0,200,248,.06) 0%,transparent 100%)}
+    header h1{font-family:'Orbitron',monospace;font-size:clamp(1.3rem,4.5vw,2.2rem);
+      font-weight:900;letter-spacing:.1em;
+      background:linear-gradient(125deg,var(--accent) 30%,var(--accent3) 100%);
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+      filter:drop-shadow(0 0 14px rgba(0,200,248,.55))}
+    header p{margin-top:7px;color:var(--muted);font-size:.8rem;letter-spacing:.04em}
+    .badge{display:inline-block;margin-top:9px;padding:3px 13px;border-radius:20px;
+      border:1px solid var(--accent2);font-size:.65rem;color:#a78bfa;
+      letter-spacing:.1em;text-transform:uppercase}
+    main{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:28px 14px 60px}
+    .upload-zone{border:2px dashed var(--border);border-radius:14px;padding:44px 20px;
+      text-align:center;cursor:pointer;transition:all .25s;background:var(--surface);
+      position:relative;overflow:hidden}
+    .upload-zone::after{content:'';position:absolute;inset:0;border-radius:14px;
+      background:radial-gradient(ellipse at center,rgba(0,200,248,.07) 0%,transparent 70%);
+      opacity:0;transition:opacity .3s;pointer-events:none}
+    .upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);box-shadow:var(--glow)}
+    .upload-zone:hover::after,.upload-zone.drag-over::after{opacity:1}
+    .upload-icon{font-size:2.8rem;margin-bottom:10px;display:block}
+    .upload-zone h2{font-family:'Orbitron',monospace;font-size:.95rem;color:var(--accent);margin-bottom:7px}
+    .upload-zone p{font-size:.79rem;color:var(--muted)}
+    #fileInput{display:none}
+    .mode-tabs{display:flex;gap:8px;margin-top:18px}
+    .mode-tab{flex:1;padding:10px 8px;border-radius:10px;border:1px solid var(--border);
+      background:var(--surface);color:var(--muted);font-size:.78rem;text-align:center;
+      cursor:pointer;transition:all .2s;font-family:'Noto Sans JP',sans-serif}
+    .mode-tab.active{border-color:var(--accent);color:var(--accent);
+      background:rgba(0,200,248,.08);box-shadow:var(--glow)}
+    .tab-title{font-family:'Orbitron',monospace;font-size:.72rem;font-weight:700;display:block;margin-bottom:3px}
+    .tab-sub{font-size:.68rem}
+    .settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:16px}
+    .setting-group{display:flex;flex-direction:column;gap:5px}
+    .setting-group label{font-size:.69rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
+    select{background:var(--surface2);border:1px solid var(--border);color:var(--text);
+      border-radius:8px;padding:7px 10px;font-family:'Noto Sans JP',sans-serif;
+      font-size:.82rem;outline:none;cursor:pointer;transition:border-color .2s;width:100%}
+    select:hover,select:focus{border-color:var(--accent)}
+    .slider-setting{display:flex;align-items:center;gap:8px}
+    input[type=range]{flex:1;-webkit-appearance:none;height:4px;
+      background:var(--border);border-radius:4px;outline:none}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+      border-radius:50%;background:var(--accent);box-shadow:0 0 8px var(--accent);cursor:pointer}
+    .range-val{min-width:32px;text-align:right;font-size:.8rem;color:var(--accent3);font-family:monospace}
+    .btn-process{width:100%;margin-top:16px;padding:14px 24px;border:none;border-radius:11px;
+      background:linear-gradient(125deg,var(--accent),var(--accent2));color:#fff;
+      font-family:'Orbitron',monospace;font-size:.9rem;font-weight:700;letter-spacing:.08em;
+      cursor:pointer;transition:all .3s;box-shadow:0 4px 22px rgba(0,200,248,.25)}
+    .btn-process:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 34px rgba(0,200,248,.42)}
+    .btn-process:disabled{opacity:.35;cursor:not-allowed;transform:none}
+    .progress-wrap{margin-top:14px;display:none}
+    .progress-wrap.show{display:block}
+    .progress-bar-bg{height:5px;background:var(--border);border-radius:5px;overflow:hidden}
+    .progress-bar-fill{height:100%;width:0%;
+      background:linear-gradient(90deg,var(--accent),var(--accent3));
+      border-radius:5px;transition:width .25s;box-shadow:0 0 10px var(--accent)}
+    .progress-label{font-size:.74rem;color:var(--accent);margin-top:6px;
+      font-family:'Orbitron',monospace;letter-spacing:.05em}
+    .log{margin-top:11px;padding:10px 14px;background:var(--surface);
+      border:1px solid var(--border);border-radius:9px;font-size:.76rem;
+      color:var(--muted);font-family:'SF Mono','Consolas',monospace;min-height:34px}
+    .log .success{color:var(--accent3)}.log .warn{color:#f59e0b}.log .err{color:#f87171}
+    .result-section{display:none;margin-top:28px}
+    .result-section.show{display:block}
+    .result-section h3{font-family:'Orbitron',monospace;font-size:.84rem;
+      color:var(--accent3);letter-spacing:.1em;margin-bottom:14px}
+    .comparison-wrap{position:relative;border-radius:12px;overflow:hidden;
+      cursor:ew-resize;user-select:none;border:1px solid var(--border);background:#000;
+      touch-action:none}
+    .comp-before{display:block;width:100%;max-height:65vh;object-fit:contain}
+    .comp-after-clip{position:absolute;top:0;left:0;width:50%;height:100%;overflow:hidden}
+    .comp-after-img{position:absolute;top:0;left:0;display:block;object-fit:contain}
+    .slider-line{position:absolute;top:0;bottom:0;left:50%;width:3px;
+      background:var(--accent);box-shadow:0 0 14px var(--accent);
+      transform:translateX(-50%);pointer-events:none}
+    .slider-handle{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+      width:38px;height:38px;border-radius:50%;background:var(--accent);
+      box-shadow:0 0 20px rgba(0,200,248,.6);display:flex;align-items:center;
+      justify-content:center;color:#000;font-weight:900;font-size:.85rem;pointer-events:none}
+    .label-before,.label-after{position:absolute;top:10px;padding:2px 9px;border-radius:5px;
+      font-size:.68rem;font-family:'Orbitron',monospace;font-weight:700;
+      letter-spacing:.08em;text-transform:uppercase;pointer-events:none}
+    .label-before{left:10px;background:rgba(0,0,0,.7);color:var(--muted);border:1px solid var(--border)}
+    .label-after{right:10px;background:rgba(0,200,248,.13);color:var(--accent);border:1px solid var(--accent)}
+    .info-row{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}
+    .info-chip{padding:5px 12px;border-radius:7px;border:1px solid var(--border);
+      font-size:.75rem;color:var(--muted);background:var(--surface)}
+    .info-chip span{color:var(--accent3);font-weight:700}
+    .btn-download{display:inline-flex;align-items:center;gap:7px;margin-top:14px;
+      padding:11px 26px;border:1px solid var(--accent3);border-radius:9px;
+      background:rgba(0,255,157,.07);color:var(--accent3);
+      font-family:'Orbitron',monospace;font-size:.82rem;font-weight:700;
+      text-decoration:none;cursor:pointer;transition:all .25s}
+    .btn-download:hover{background:rgba(0,255,157,.16);box-shadow:var(--glow3);transform:translateY(-2px)}
+    @media(max-width:500px){.mode-tabs{flex-direction:column}}
+  </style>
+</head>
+<body>
+<header>
+  <h1>⚡ AI IMAGE ENHANCER</h1>
+  <p>ぼかし除去 ＆ 超解像 — ブラウザ完結・サーバー送信なし</p>
+  <span class="badge">Separable Lanczos-3 · Web Worker · Unsharp Mask</span>
+</header>
+<main>
+  <div class="upload-zone" id="uploadZone">
+    <input type="file" id="fileInput" accept="image/*" />
+    <span class="upload-icon">🖼️</span>
+    <h2>画像をドロップ または クリックして選択</h2>
+    <p>PNG / JPG / WEBP 対応　·　ファイルはローカル処理のみ（サーバー送信なし）</p>
+  </div>
+
+  <div class="mode-tabs">
+    <div class="mode-tab active" data-mode="canvas" id="tabCanvas" onclick="selectMode('canvas')">
+      <span class="tab-title">🎨 CANVAS MODE</span>
+      <span class="tab-sub">高速・確実動作<br>Lanczos-3 + Unsharp Mask</span>
+    </div>
+    <div class="mode-tab" data-mode="ai" id="tabAI" onclick="selectMode('ai')">
+      <span class="tab-title">🤖 AI MODE</span>
+      <span class="tab-sub">ESRGAN超解像(×2/3/4)<br>低速・高精度・要ネット</span>
+    </div>
+  </div>
+
+  <div class="settings-grid">
+    <div class="setting-group">
+      <label>アップスケール倍率</label>
+      <select id="scaleSelect">
+        <option value="2">× 2</option>
+        <option value="3">× 3</option>
+        <option value="4" selected>× 4</option>
+      </select>
+    </div>
+    <div class="setting-group">
+      <label>シャープ強度</label>
+      <div class="slider-setting">
+        <input type="range" id="sharpAmt" min="0" max="5" step="0.5" value="1.5"
+          oninput="document.getElementById('sharpVal').textContent=this.value" />
+        <span class="range-val" id="sharpVal">1.5</span>
+      </div>
+    </div>
+    <div class="setting-group">
+      <label>ノイズ除去</label>
+      <select id="denoiseSelect">
+        <option value="0">なし</option>
+        <option value="1" selected>弱</option>
+        <option value="2">中</option>
+        <option value="3">強</option>
+      </select>
+    </div>
+    <div class="setting-group">
+      <label>出力形式</label>
+      <select id="fmtSelect">
+        <option value="image/png" selected>PNG（高品質）</option>
+        <option value="image/jpeg">JPEG（軽量）</option>
+        <option value="image/webp">WebP</option>
+      </select>
+    </div>
+  </div>
+
+  <button class="btn-process" id="btnAuto" style="background:linear-gradient(125deg,var(--accent3),var(--accent2))" disabled>🪄 おまかせ画質（端末に最適化して自動実行）</button>
+  <button class="btn-process" id="btnProcess" disabled>🚀 高画質化 START（手動設定）</button>
+  <div style="text-align:right;margin-top:6px">
+    <button id="btnResetLearn" style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;text-decoration:underline">🧹 おまかせ学習をリセット</button>
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-label" id="progressLabel">処理中...</div>
+  </div>
+  <div class="log" id="log">画像を選択してください...</div>
+
+  <div class="result-section" id="resultSection">
+    <h3>📊 BEFORE / AFTER — ドラッグでスライド</h3>
+    <div class="comparison-wrap" id="compWrap">
+      <img class="comp-before" id="imgBefore" src="" alt="Before" />
+      <div class="comp-after-clip" id="compAfterClip">
+        <img class="comp-after-img" id="imgAfter" src="" alt="After" />
+      </div>
+      <div class="slider-line" id="sliderLine">
+        <div class="slider-handle">⇔</div>
+      </div>
+      <span class="label-before">BEFORE</span>
+      <span class="label-after">ENHANCED</span>
+    </div>
+    <div class="info-row">
+      <div class="info-chip">元: <span id="origSize">—</span></div>
+      <div class="info-chip">出力: <span id="outSize">—</span></div>
+      <div class="info-chip">処理時間: <span id="procTime">—</span></div>
+      <div class="info-chip">モード: <span id="modeUsed">—</span></div>
+    </div>
+    <div id="learnInfo" style="margin-top:10px;padding:9px 12px;border:1px dashed var(--border);border-radius:8px;font-size:.7rem;color:var(--muted);line-height:1.8"></div>
+    <a class="btn-download" id="btnDownload" href="#" download="enhanced.png">⬇ ダウンロード</a>
+  </div>
+</main>
+
+<script>
+/* ====== State ====== */
+let originalFile = null;
+let currentMode = 'canvas';
+let beforeURL = null;   // ObjectURL（before表示用）
+let afterURL  = null;   // ObjectURL（after/ダウンロード用）
+
+/* ====== 端末ごとの学習（localStorage） ======
+   GPUクラッシュ(白画面)はJSが動けないため、AI実行直前にbreadcrumbを保存し
+   正常終了時に消す。次回起動時に残っていれば「前回未完走＝危険」と判断して上限を下げる。
+   スキーマ: { aiCrashPx(0=無), aiSafePx(0=無), attempt(null|{inPx,scale,ts}), crashes, history[] } */
+const LS_KEY='aie_learn_v1';
+function lsLoad(){ try{ return JSON.parse(localStorage.getItem(LS_KEY))||{}; }catch(_){ return {}; } }
+function lsSave(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(learn)); }catch(_){} }
+let learn = lsLoad();
+function aiCapFromLearn(){ return (learn.aiCrashPx>0) ? Math.floor(learn.aiCrashPx*0.85) : Infinity; }
+function recordOutcome(ok, inPx, scale, sec){
+  if(ok){
+    learn.aiSafePx=Math.max(learn.aiSafePx||0, inPx);
+    if(sec>40){ learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, inPx) : Math.round(inPx*1.25); } // 遅すぎ→上限化
+  }else if(inPx>0){
+    learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, inPx) : inPx;
+  }
+  (learn.history=learn.history||[]).push({ok,inPx,scale,sec,ts:Date.now()});
+  if(learn.history.length>20) learn.history=learn.history.slice(-20);
+  lsSave();
+}
+let _crashNotePx=0;
+function initLearn(){
+  if(learn.attempt && learn.attempt.inPx){            // 前回AIが完走せず終了＝クラッシュ/中断
+    const px=learn.attempt.inPx;
+    learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, px) : px;
+    learn.crashes=(learn.crashes||0)+1;
+    learn.attempt=null; lsSave();
+    _crashNotePx=px;
+  }
+}
+initLearn();
+if(_crashNotePx){ setTimeout(()=>setLog(`⚠️ 前回のAI処理が完了しませんでした。おまかせの安全上限を約${Math.round(_crashNotePx/1000)}k pxに自動調整しました。`,'warn'),0); }
+
+function selectMode(mode) {
+  currentMode = mode;
+  document.getElementById('tabCanvas').classList.toggle('active', mode==='canvas');
+  document.getElementById('tabAI').classList.toggle('active', mode==='ai');
+  setLog(mode==='canvas'?'🎨 Canvasモード（高速・確実）に設定':'🤖 AIモード（ESRGAN 2x）に設定');
+}
+
+/* ====== Upload ====== */
+const uploadZone = document.getElementById('uploadZone');
+const fileInput  = document.getElementById('fileInput');
+uploadZone.addEventListener('click', ()=>fileInput.click());
+uploadZone.addEventListener('dragover',  e=>{e.preventDefault();uploadZone.classList.add('drag-over')});
+uploadZone.addEventListener('dragleave', ()=>uploadZone.classList.remove('drag-over'));
+uploadZone.addEventListener('drop', e=>{
+  e.preventDefault();uploadZone.classList.remove('drag-over');
+  if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change',()=>{if(fileInput.files[0])handleFile(fileInput.files[0])});
+
+function handleFile(file) {
+  if(!file.type.startsWith('image/')){setLog('❌ 画像ファイルを選択してください','err');return}
+  originalFile = file;
+  if(beforeURL) URL.revokeObjectURL(beforeURL);
+  beforeURL = URL.createObjectURL(file);
+  document.getElementById('imgBefore').src = beforeURL;
+  document.getElementById('resultSection').classList.remove('show');
+  document.getElementById('btnProcess').disabled = false;
+  document.getElementById('btnAuto').disabled = false;
+  setLog(`✅ ${file.name}（${(file.size/1024).toFixed(0)} KB）読み込み完了`,'success');
+}
+
+/* ====== Helpers ====== */
+function setLog(msg,type=''){document.getElementById('log').innerHTML=`<span class="${type}">${msg}</span>`}
+function setProgress(pct,label){
+  document.getElementById('progressFill').style.width=pct+'%';
+  if(label!==undefined) document.getElementById('progressLabel').textContent=label;
+}
+function makeCanvas(w,h){const c=document.createElement('canvas');c.width=w;c.height=h;return c}
+function loadImage(src){
+  return new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej(new Error('画像の読み込みに失敗'));i.src=src;});
+}
+function toBlobP(canvas,type,q){return new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('出力生成に失敗（サイズ超過の可能性）')),type,q));}
+function delay(ms){return new Promise(r=>setTimeout(r,ms))}
+function loadScript(src,id){
+  return new Promise((res,rej)=>{
+    if(document.getElementById(id)){res();return}
+    const s=document.createElement('script');s.id=id;s.src=src;
+    s.onload=res;s.onerror=()=>rej(new Error('スクリプト読込失敗: '+src));
+    document.head.appendChild(s);
+  });
+}
+
+/* ====== iOS/ブラウザ Canvas 上限対策 ======
+   iOS Safari は総面積 約16.7M px・1辺 約4096px が上限。超えると出力が空になるため安全側にクランプ */
+const MAX_AREA = 16777216, MAX_SIDE = 4096;
+function safeSize(W,H,scale){
+  let oW=Math.round(W*scale), oH=Math.round(H*scale), f=1;
+  if(Math.max(oW,oH)>MAX_SIDE) f=Math.min(f, MAX_SIDE/Math.max(oW,oH));
+  if(oW*oH*f*f>MAX_AREA)       f=Math.min(f, Math.sqrt(MAX_AREA/(oW*oH)));
+  if(f<1){oW=Math.max(1,Math.floor(oW*f));oH=Math.max(1,Math.floor(oH*f));}
+  return {oW,oH,capped:f<1};
+}
+
+/* ====== 画像処理コア（Worker と インラインで共用） ====== */
+function lanczos(x,a){ if(x===0)return 1; if(x<=-a||x>=a)return 0; const px=Math.PI*x; return a*Math.sin(px)*Math.sin(px/a)/(px*px); }
+function buildWeights(srcLen,dstLen,a){
+  const scale=srcLen/dstLen, out=new Array(dstLen);
+  for(let i=0;i<dstLen;i++){
+    const center=(i+0.5)*scale-0.5, lf=Math.floor(center)-a+1, rt=Math.floor(center)+a;
+    const idx=[],w=[]; let sum=0;
+    for(let j=lf;j<=rt;j++){ const ww=lanczos(center-j,a); if(ww===0)continue; const c=j<0?0:(j>=srcLen?srcLen-1:j); idx.push(c); w.push(ww); sum+=ww; }
+    for(let k=0;k<w.length;k++) w[k]/=sum;
+    out[i]={idx,w};
+  }
+  return out;
+}
+function resizeSeparable(src,W,H,oW,oH,a,prog){
+  const wx=buildWeights(W,oW,a), wy=buildWeights(H,oH,a);
+  const tmp=new Float32Array(oW*H*4);
+  for(let y=0;y<H;y++){
+    const row=y*W*4;
+    for(let x=0;x<oW;x++){
+      const ww=wx[x], idx=ww.idx, w=ww.w; let r=0,g=0,b=0,al=0;
+      for(let k=0;k<w.length;k++){ const i=row+idx[k]*4, q=w[k]; r+=src[i]*q;g+=src[i+1]*q;b+=src[i+2]*q;al+=src[i+3]*q; }
+      const o=(y*oW+x)*4; tmp[o]=r;tmp[o+1]=g;tmp[o+2]=b;tmp[o+3]=al;
+    }
+    if(prog&&(y&31)===0)prog(0.5*y/H);
+  }
+  const dst=new Uint8ClampedArray(oW*oH*4);
+  for(let y=0;y<oH;y++){
+    const ww=wy[y], idx=ww.idx, w=ww.w;
+    for(let x=0;x<oW;x++){
+      let r=0,g=0,b=0,al=0;
+      for(let k=0;k<w.length;k++){ const i=(idx[k]*oW+x)*4, q=w[k]; r+=tmp[i]*q;g+=tmp[i+1]*q;b+=tmp[i+2]*q;al+=tmp[i+3]*q; }
+      const o=(y*oW+x)*4; dst[o]=r;dst[o+1]=g;dst[o+2]=b;dst[o+3]=al;
+    }
+    if(prog&&(y&31)===0)prog(0.5+0.5*y/oH);
+  }
+  return dst;
+}
+function boxBlurSep(src,W,H,r){
+  if(r<=0)return src;
+  const d=Math.min(r,4), win=2*d+1;
+  const tmp=new Uint8ClampedArray(src.length), out=new Uint8ClampedArray(src.length);
+  for(let y=0;y<H;y++){ const row=y*W*4;
+    for(let c=0;c<4;c++){ let sum=0;
+      for(let k=-d;k<=d;k++){ const xx=Math.min(W-1,Math.max(0,k)); sum+=src[row+xx*4+c]; }
+      for(let x=0;x<W;x++){ tmp[row+x*4+c]=sum/win;
+        const xi=Math.min(W-1,x+d+1), xo=Math.max(0,x-d); sum+=src[row+xi*4+c]-src[row+xo*4+c]; }
+    }
+  }
+  for(let x=0;x<W;x++){
+    for(let c=0;c<4;c++){ let sum=0;
+      for(let k=-d;k<=d;k++){ const yy=Math.min(H-1,Math.max(0,k)); sum+=tmp[(yy*W+x)*4+c]; }
+      for(let y=0;y<H;y++){ out[(y*W+x)*4+c]=sum/win;
+        const yi=Math.min(H-1,y+d+1), yo=Math.max(0,y-d); sum+=tmp[(yi*W+x)*4+c]-tmp[(yo*W+x)*4+c]; }
+    }
+  }
+  return out;
+}
+function gaussBlurSep(src,W,H,sigma){
+  if(sigma<=0)return src;
+  const r=Math.max(1,Math.ceil(sigma*2.5)), k=[]; let s=0;
+  for(let i=-r;i<=r;i++){ const v=Math.exp(-i*i/(2*sigma*sigma)); k.push(v); s+=v; }
+  for(let i=0;i<k.length;i++)k[i]/=s;
+  const tmp=new Float32Array(src.length), out=new Float32Array(src.length);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ let r0=0,g0=0,b0=0;
+    for(let j=-r;j<=r;j++){ const nx=Math.min(W-1,Math.max(0,x+j)), i=(y*W+nx)*4, w=k[j+r]; r0+=src[i]*w;g0+=src[i+1]*w;b0+=src[i+2]*w; }
+    const o=(y*W+x)*4; tmp[o]=r0;tmp[o+1]=g0;tmp[o+2]=b0;tmp[o+3]=src[o+3];
+  }
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){ let r0=0,g0=0,b0=0;
+    for(let j=-r;j<=r;j++){ const ny=Math.min(H-1,Math.max(0,y+j)), i=(ny*W+x)*4, w=k[j+r]; r0+=tmp[i]*w;g0+=tmp[i+1]*w;b0+=tmp[i+2]*w; }
+    const o=(y*W+x)*4; out[o]=r0;out[o+1]=g0;out[o+2]=b0;out[o+3]=tmp[o+3];
+  }
+  return out;
+}
+function unsharp(src,W,H,amount,radius){
+  if(amount<=0)return src;
+  const b=gaussBlurSep(src,W,H,radius), out=new Uint8ClampedArray(src.length);
+  for(let i=0;i<src.length;i+=4){
+    out[i]=src[i]+amount*(src[i]-b[i]);
+    out[i+1]=src[i+1]+amount*(src[i+1]-b[i+1]);
+    out[i+2]=src[i+2]+amount*(src[i+2]-b[i+2]);
+    out[i+3]=src[i+3];
+  }
+  return out;
+}
+
+/* ====== Worker（インラインBlob・上記コアを再利用） ====== */
+const WORKER_SRC = [lanczos,buildWeights,resizeSeparable,boxBlurSep,gaussBlurSep,unsharp]
+  .map(f=>f.toString()).join('\n') + `
+self.onmessage=function(e){
+  var d=e.data; var src=new Uint8ClampedArray(d.buf);
+  try{
+    if(d.denoise>0) src=boxBlurSep(src,d.W,d.H,d.denoise);
+    self.postMessage({type:'p',pct:10});
+    var dst=resizeSeparable(src,d.W,d.H,d.oW,d.oH,d.a,function(p){ self.postMessage({type:'p',pct:10+Math.round(p*72)}); });
+    if(d.sharp>0) dst=unsharp(dst,d.oW,d.oH,d.sharp,1.0);
+    self.postMessage({type:'p',pct:100});
+    self.postMessage({type:'done',buf:dst.buffer,oW:d.oW,oH:d.oH},[dst.buffer]);
+  }catch(err){ self.postMessage({type:'err',msg:String(err&&err.message||err)}); }
+};`;
+
+function runPipeline(d,onPct){
+  return new Promise((resolve,reject)=>{
+    let w=null;
+    try{ w=new Worker(URL.createObjectURL(new Blob([WORKER_SRC],{type:'text/javascript'}))); }catch(_){ w=null; }
+    if(w){
+      w.onmessage=ev=>{
+        const m=ev.data;
+        if(m.type==='p'){ onPct&&onPct(m.pct); }
+        else if(m.type==='done'){ w.terminate(); resolve(m); }
+        else if(m.type==='err'){ w.terminate(); reject(new Error(m.msg)); }
+      };
+      w.onerror=e=>{ w.terminate(); reject(new Error('Worker内エラー: '+(e.message||''))); };
+      w.postMessage(d,[d.buf]);
+    }else{
+      // フォールバック（Worker不可）: メインスレッドで実行
+      try{
+        let src=new Uint8ClampedArray(d.buf);
+        if(d.denoise>0) src=boxBlurSep(src,d.W,d.H,d.denoise);
+        onPct&&onPct(10);
+        let dst=resizeSeparable(src,d.W,d.H,d.oW,d.oH,d.a,p=>onPct&&onPct(10+Math.round(p*72)));
+        if(d.sharp>0) dst=unsharp(dst,d.oW,d.oH,d.sharp,1.0);
+        onPct&&onPct(100);
+        resolve({buf:dst.buffer,oW:d.oW,oH:d.oH});
+      }catch(e){reject(e);}
+    }
+  });
+}
+
+/* ====== Main Process ====== */
+async function runEnhance(){
+  if(!originalFile)return;
+  document.getElementById('btnProcess').disabled=true;
+  document.getElementById('btnAuto').disabled=true;
+  document.getElementById('progressWrap').classList.add('show');
+  document.getElementById('resultSection').classList.remove('show');
+  setProgress(0,'準備中...');
+  try{
+    const scale=parseInt(document.getElementById('scaleSelect').value);
+    const sharp=parseFloat(document.getElementById('sharpAmt').value);
+    const denoise=parseInt(document.getElementById('denoiseSelect').value);
+    const fmt=document.getElementById('fmtSelect').value;
+    if(currentMode==='ai') await processAI(scale,sharp,denoise,fmt);
+    else await processCanvas(scale,sharp,denoise,fmt);
+  }catch(e){
+    console.error(e);
+    setLog('❌ エラー: '+e.message,'err');
+    setProgress(0,'エラー');
+  }finally{
+    document.getElementById('btnProcess').disabled=false;
+    document.getElementById('btnAuto').disabled=false;
+    document.getElementById('progressWrap').classList.remove('show');
+  }
+}
+document.getElementById('btnProcess').addEventListener('click',()=>{ lastDecision='手動設定'; runEnhance(); });
+document.getElementById('btnAuto').addEventListener('click',autoEnhance);
+document.getElementById('btnResetLearn').addEventListener('click',()=>{
+  learn={}; lsSave();
+  setLog('🧹 おまかせの学習データをリセットしました（次回から初期判定に戻ります）','success');
+});
+
+/* ====== おまかせ画質（端末性能＋画像サイズで自動設定） ====== */
+function deviceProfile(){
+  const ua=navigator.userAgent||'';
+  const iOS=/iP(hone|od|ad)/.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  const mobile=iOS || /Android|Mobile/i.test(ua) || (window.matchMedia && matchMedia('(pointer:coarse)').matches);
+  let webgl=false; try{const c=document.createElement('canvas'); webgl=!!(c.getContext('webgl2')||c.getContext('webgl'));}catch(_){}
+  const mem=navigator.deviceMemory||0; // GB（iOSはundefined→0）
+  return {iOS,mobile,webgl,mem};
+}
+function autoDecide(W,H){
+  const {iOS,mobile,webgl,mem}=deviceProfile();
+  const px=W*H;
+  // AIを許可する入力px上限（WebGL必須・モバイルは保守的・高メモリPCは緩め）＋学習で得た安全上限
+  const heuristicCap = !webgl ? 0 : mobile ? 600000 : (mem>=8 ? 1600000 : 1000000);
+  const aiCapPx = Math.min(heuristicCap, aiCapFromLearn());
+  let mode,scale,sharp,denoise,reason;
+  if(px>0 && px<=aiCapPx){
+    mode='ai'; sharp=1.0; denoise=0;
+    if(px<=160000) scale=4;        // ≲400×400
+    else if(px<=400000) scale=3;   // ≲630×630
+    else scale=2;
+    if(mobile) scale=Math.min(scale,2);          // モバイルは×2上限で安全側
+    reason=`AIモード ×${scale}（ESRGAN）— 入力 ${W}×${H}px・${mobile?'モバイル安全設定':'PC設定'}`;
+  }else{
+    mode='canvas'; sharp=1.5; denoise=1;
+    scale = px<=500000 ? 4 : 2;                  // 小さければ×4、大きければ×2
+    reason = !webgl
+      ? `Canvasモード ×${scale}（WebGL非対応のためAIは不使用・確実動作）`
+      : (aiCapFromLearn()<heuristicCap
+          ? `Canvasモード ×${scale}（学習: この端末はAIで負荷大のため安全側・確実動作）`
+          : `Canvasモード ×${scale}（入力 ${W}×${H}px が大きめ → 高速・無クラッシュ優先）`);
+  }
+  if(isFinite(aiCapFromLearn())) reason += `（学習上限≈${Math.round(aiCapFromLearn()/1000)}k px）`;
+  return {mode,scale,sharp,denoise,reason};
+}
+async function autoEnhance(){
+  if(!originalFile){setLog('先に画像を選択してください','warn');return;}
+  let W=0,H=0;
+  try{const im=await loadImage(beforeURL); W=im.naturalWidth; H=im.naturalHeight;}catch(_){}
+  const d=autoDecide(W,H);
+  // 選んだ設定をUIへ反映（ユーザーにも見えるように）
+  document.getElementById('scaleSelect').value=String(d.scale);
+  document.getElementById('sharpAmt').value=String(d.sharp);
+  document.getElementById('sharpVal').textContent=String(d.sharp);
+  document.getElementById('denoiseSelect').value=String(d.denoise);
+  selectMode(d.mode);
+  lastDecision = `おまかせ → ${d.reason}`;
+  setLog(`🪄 おまかせ判定 → ${d.reason}`,'success');
+  await delay(300);
+  await runEnhance();
+}
+
+/* ====== Canvas Mode ====== */
+async function processCanvas(scale,sharpAmt,denoiseLv,fmt){
+  const t0=performance.now();
+  setLog('🎨 Canvas処理開始...','warn');
+  const imgEl=await loadImage(beforeURL);
+  const W=imgEl.naturalWidth,H=imgEl.naturalHeight;
+  document.getElementById('origSize').textContent=`${W} × ${H} px`;
+
+  const {oW,oH,capped}=safeSize(W,H,scale);
+  if(capped) setLog(`⚠️ 出力が端末の上限を超えるため ${oW}×${oH}px に自動調整しました（iOS安全化）`,'warn');
+
+  setProgress(5,'ソース読み込み中...');
+  const sc=makeCanvas(W,H);
+  sc.getContext('2d',{willReadFrequently:true}).drawImage(imgEl,0,0);
+  const sdata=sc.getContext('2d').getImageData(0,0,W,H);
+
+  setProgress(10, denoiseLv>0?`ノイズ除去＋Lanczos-3 補間中...`:'Lanczos-3 補間中...');
+  const res=await runPipeline(
+    {buf:sdata.data.buffer,W,H,oW,oH,denoise:denoiseLv,sharp:sharpAmt,a:3},
+    pct=>setProgress(pct, pct<82?`Lanczos-3 補間 ${pct}%`:(sharpAmt>0?'アンシャープマスク適用中...':'仕上げ中...'))
+  );
+
+  setProgress(98,'出力生成中...');
+  const out=makeCanvas(res.oW,res.oH);
+  out.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.oW,res.oH),0,0);
+  const ext=fmt==='image/jpeg'?'jpg':fmt==='image/webp'?'webp':'png';
+  const blob=await toBlobP(out,fmt,fmt==='image/png'?undefined:0.95);
+  const elapsed=((performance.now()-t0)/1000).toFixed(1);
+  setProgress(100,'完了！');
+  applyResult(blob,res.oW,res.oH,elapsed,ext,'Canvas Lanczos-3');
+}
+
+/* ====== AI Mode ======
+   重要: UpscalerJSをUMD(スクリプトタグ)で使う場合、モデルパッケージを必ず別途読み込み
+   new Upscaler({model}) で渡す必要がある。倍率に応じて esrgan-slim の対応モデルを使用。 */
+const AI_MODELS = {
+  2: { file:'2x.min.js', global:'ESRGANSlim2x' },
+  3: { file:'3x.min.js', global:'ESRGANSlim3x' },
+  4: { file:'4x.min.js', global:'ESRGANSlim4x' },
+};
+async function processAI(scale,sharpAmt,denoiseLv,fmt){
+  setProgress(4,'TensorFlow.js 読み込み中...');
+  setLog('⚙️ AI ライブラリ読み込み中（初回はモデルのDLに時間がかかります）...','warn');
+  let upscaler=null, attemptPx=0;        // attemptPx: 学習記録用の実処理入力px
+  try{
+    if(!navigator.onLine) throw new Error('オフライン（AIモードはネット接続が必要）');
+    const mdl=AI_MODELS[scale]||AI_MODELS[4];
+    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js','tf-js');
+    setProgress(9,'ESRGANモデル読み込み中...');
+    await loadScript(`https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/${mdl.file}`,'esrgan-'+scale);
+    setProgress(14,'UpscalerJS 読み込み中...');
+    await loadScript('https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js','upscaler-js');
+    if(typeof window.Upscaler!=='function') throw new Error('Upscaler本体が読み込めません');
+    const model=window[mdl.global];
+    if(!model) throw new Error('ESRGANモデル('+mdl.global+')が読み込めません');
+
+    // ── GPUメモリ枯渇（白画面クラッシュ）対策 ──
+    if(window.tf){
+      try{
+        // float16テクスチャでVRAM半減、使用後テクスチャを即時解放
+        tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);
+        // 前回クラッシュ等で壊れたバックエンドを再初期化（再処理失敗対策）
+        await tf.ready();
+        if(tf.getBackend()!=='webgl'){ await tf.setBackend('webgl'); }
+        await tf.ready();
+      }catch(_){}
+    }
+
+    const t0=performance.now();
+    const imgEl=await loadImage(beforeURL);
+    const W=imgEl.naturalWidth,H=imgEl.naturalHeight;
+    document.getElementById('origSize').textContent=`${W} × ${H} px`;
+
+    // 出力はCanvas上限内、かつ入力はGPU安全枠内に事前縮小（学習で得た上限も適用）
+    const AI_MAX_INPUT_PX = Math.min(1000000, aiCapFromLearn());   // 学習でこの端末の安全上限を反映
+    const {oW,oH}=safeSize(W,H,scale);
+    let needInW=Math.round(oW/scale), needInH=Math.round(oH/scale);
+    const inPx=needInW*needInH;
+    if(inPx>AI_MAX_INPUT_PX){
+      const g=Math.sqrt(AI_MAX_INPUT_PX/inPx);
+      needInW=Math.max(1,Math.floor(needInW*g));
+      needInH=Math.max(1,Math.floor(needInH*g));
+    }
+    let inputEl=imgEl, inW=W, inH=H;
+    if(needInW<W||needInH<H){
+      const dc=makeCanvas(needInW,needInH), dx=dc.getContext('2d');
+      dx.imageSmoothingEnabled=true; dx.imageSmoothingQuality='high';
+      dx.drawImage(imgEl,0,0,needInW,needInH);
+      inputEl=await loadImage(dc.toDataURL('image/png')); inW=needInW; inH=needInH;
+      setLog(`ℹ️ メモリ安全化のため入力を ${inW}×${inH}px に調整（出力 ${inW*scale}×${inH*scale}px）`,'warn');
+    }
+    attemptPx=inW*inH;
+
+    setProgress(20,`ESRGAN 推論中（×${scale}）...`);
+    setLog(`🔬 ESRGAN超解像中（esrgan-slim ×${scale} / 小パッチ処理）...`,'warn');
+    // クラッシュ検知用 breadcrumb（白画面で落ちても残る→次回起動時に検知）
+    learn.attempt={inPx:attemptPx,scale,ts:Date.now()}; lsSave();
+    upscaler=new window.Upscaler({ model });
+    const result=await upscaler.upscale(inputEl,{
+      patchSize:32, padding:2, output:'base64',   // 小パッチでピークVRAMを抑制
+      progress:p=>setProgress(20+Math.round(p*62),`ESRGAN ${Math.round(p*100)}%`)
+    });
+    const aiSrc=typeof result==='string'?result:(result&&result.toDataURL?result.toDataURL('image/png'):'');
+    if(!aiSrc) throw new Error('AI出力の取得に失敗');
+    const aiImg=await loadImage(aiSrc);
+    const aW=aiImg.naturalWidth,aH=aiImg.naturalHeight;
+
+    // 仕上げのアンシャープ（Workerで・同寸・GPU不使用）
+    const ac=makeCanvas(aW,aH);
+    ac.getContext('2d',{willReadFrequently:true}).drawImage(aiImg,0,0);
+    const adata=ac.getContext('2d').getImageData(0,0,aW,aH);
+    setProgress(84,'シャープ仕上げ中...');
+    let outBuf=adata.data.buffer, foW=aW, foH=aH;
+    if(sharpAmt>0){
+      const res=await runPipeline(
+        {buf:adata.data.buffer,W:aW,H:aH,oW:aW,oH:aH,denoise:0,sharp:sharpAmt*0.5,a:3},
+        pct=>setProgress(84+Math.round(pct*0.14),`仕上げ ${pct}%`)
+      );
+      outBuf=res.buf; foW=res.oW; foH=res.oH;
+    }
+    const out=makeCanvas(foW,foH);
+    out.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(outBuf),foW,foH),0,0);
+    const ext=fmt==='image/jpeg'?'jpg':fmt==='image/webp'?'webp':'png';
+    const blob=await toBlobP(out,fmt,fmt==='image/png'?undefined:0.95);
+    const elapsed=((performance.now()-t0)/1000).toFixed(1);
+    setProgress(100,'完了！');
+    recordOutcome(true, attemptPx, scale, parseFloat(elapsed));   // 学習: 成功＋所要時間
+    applyResult(blob,foW,foH,elapsed,ext,`AI ESRGAN-slim ×${scale}`);
+  }catch(e){
+    console.warn('AI失敗:',e.message);
+    recordOutcome(false, attemptPx, scale, 0);                    // 学習: 失敗→上限を下げる
+    setLog(`⚠️ AIモード失敗（${e.message}）→ Canvasモードで代替処理`,'warn');
+    await delay(500);
+    await processCanvas(scale,sharpAmt,denoiseLv,fmt);
+  }finally{
+    // breadcrumbを消す（消えていなければ＝白画面クラッシュ。次回起動時に検知される）
+    learn.attempt=null; lsSave();
+    // モデル・テンソルを確実に解放し、次回の再処理を成功させる
+    try{ if(upscaler&&upscaler.dispose) await upscaler.dispose(); }catch(_){}
+    try{ if(window.tf&&tf.disposeVariables) tf.disposeVariables(); }catch(_){}
+  }
+}
+
+/* ====== Result ====== */
+let lastDecision='手動設定';
+function fmtPx(p){ if(!(p>0)||!isFinite(p))return '—'; return p>=1e6?(p/1e6).toFixed(2)+'M px':Math.round(p/1000)+'k px'; }
+function renderLearnInfo(){
+  const el=document.getElementById('learnInfo'); if(!el)return;
+  const cap=aiCapFromLearn();
+  el.innerHTML =
+    `🧭 判定根拠: <span style="color:var(--accent)">${lastDecision}</span><br>`+
+    `🧠 学習状況: AI安全上限 <b style="color:var(--accent3)">${isFinite(cap)?fmtPx(cap):'制限なし'}</b>`+
+    ` ／ 成功実績 <b style="color:var(--accent3)">${fmtPx(learn.aiSafePx||0)}</b>`+
+    ` ／ クラッシュ <b style="color:#f87171">${learn.crashes||0}</b> 回`+
+    ` ／ 記録 ${learn.history?learn.history.length:0} 件`;
+}
+function applyResult(blob,oW,oH,elapsed,ext,modeName){
+  if(afterURL) URL.revokeObjectURL(afterURL);
+  afterURL=URL.createObjectURL(blob);
+  const ia=document.getElementById('imgAfter');
+  ia.src=afterURL;
+  document.getElementById('outSize').textContent=`${oW} × ${oH} px`;
+  document.getElementById('procTime').textContent=`${elapsed} 秒`;
+  document.getElementById('modeUsed').textContent=modeName;
+  const dl=document.getElementById('btnDownload');
+  dl.href=afterURL; dl.download='enhanced.'+ext;
+  document.getElementById('resultSection').classList.add('show');
+  setupComparison();
+  renderLearnInfo();
+  setLog(`✅ 完了！ ${elapsed}秒 / 出力: ${oW}×${oH}px / ${(blob.size/1024).toFixed(0)} KB`,'success');
+}
+
+/* ====== Comparison Slider（画像固定・クリップのみ移動） ====== */
+let compInit=false;
+function setupComparison(){
+  const wrap=document.getElementById('compWrap');
+  const clip=document.getElementById('compAfterClip');
+  const line=document.getElementById('sliderLine');
+  const ia=document.getElementById('imgAfter');
+  const ib=document.getElementById('imgBefore');
+
+  // after画像のボックスをbefore画像と完全一致させる（object-fit:contain で内側に収める）
+  function sizeAfter(){ ia.style.width=ib.clientWidth+'px'; ia.style.height=ib.clientHeight+'px'; }
+  if(ib.complete) sizeAfter(); else ib.onload=sizeAfter;
+  ia.onload=sizeAfter;
+
+  const set=p=>{ p=Math.max(.02,Math.min(.98,p)); clip.style.width=p*100+'%'; line.style.left=p*100+'%'; };
+  set(.5);
+  const move=cx=>{ const r=wrap.getBoundingClientRect(); set((cx-r.left)/r.width); };
+
+  if(!compInit){
+    let drag=false;
+    wrap.addEventListener('mousedown', e=>{drag=true;move(e.clientX)});
+    document.addEventListener('mouseup', ()=>{drag=false});
+    document.addEventListener('mousemove',e=>{if(drag)move(e.clientX)});
+    wrap.addEventListener('touchstart',e=>{drag=true;move(e.touches[0].clientX)},{passive:true});
+    document.addEventListener('touchend',()=>{drag=false});
+    document.addEventListener('touchmove',e=>{if(drag)move(e.touches[0].clientX)},{passive:true});
+    window.addEventListener('resize',sizeAfter);
+    compInit=true;
+  }
+}
+</script>
+<script>
+// ── PWA Service Worker 登録 ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js')
+      .catch(err => console.warn('SW registration failed:', err));
+  });
+}
+</script>
+</body>
+</html>
