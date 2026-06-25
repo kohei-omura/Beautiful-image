@@ -148,7 +148,7 @@
     </div>
     <div class="mode-tab" data-mode="ai" id="tabAI" onclick="selectMode('ai')">
       <span class="tab-title">🤖 AI MODE</span>
-      <span class="tab-sub">ESRGAN超解像(2x)<br>低速・高精度</span>
+      <span class="tab-sub">ESRGAN超解像(×2/3/4)<br>低速・高精度・要ネット</span>
     </div>
   </div>
 
@@ -472,46 +472,79 @@ async function processCanvas(scale,sharpAmt,denoiseLv,fmt){
   applyResult(blob,res.oW,res.oH,elapsed,ext,'Canvas Lanczos-3');
 }
 
-/* ====== AI Mode ====== */
+/* ====== AI Mode ======
+   重要: UpscalerJSをUMD(スクリプトタグ)で使う場合、モデルパッケージを必ず別途読み込み
+   new Upscaler({model}) で渡す必要がある。倍率に応じて esrgan-slim の対応モデルを使用。 */
+const AI_MODELS = {
+  2: { file:'2x.min.js', global:'ESRGANSlim2x' },
+  3: { file:'3x.min.js', global:'ESRGANSlim3x' },
+  4: { file:'4x.min.js', global:'ESRGANSlim4x' },
+};
 async function processAI(scale,sharpAmt,denoiseLv,fmt){
-  setProgress(5,'TensorFlow.js 読み込み中...');
-  setLog('⚙️ AI ライブラリ読み込み中...','warn');
+  setProgress(4,'TensorFlow.js 読み込み中...');
+  setLog('⚙️ AI ライブラリ読み込み中（初回はモデルのDLに時間がかかります）...','warn');
   try{
+    if(!navigator.onLine) throw new Error('オフライン（AIモードはネット接続が必要）');
+    const mdl=AI_MODELS[scale]||AI_MODELS[4];
+    // 1) TensorFlow.js → 2) モデル → 3) UpscalerJS本体 の順で読み込む
     await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js','tf-js');
-    setProgress(12,'UpscalerJS 読み込み中...');
-    await loadScript('https://cdn.jsdelivr.net/npm/upscaler@1.0.0-beta.18/dist/browser/umd/upscaler.min.js','upscaler-js');
-    if(typeof window.Upscaler!=='function') throw new Error('Upscalerが見つかりません');
+    setProgress(9,'ESRGANモデル読み込み中...');
+    await loadScript(`https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/${mdl.file}`,'esrgan-'+scale);
+    setProgress(14,'UpscalerJS 読み込み中...');
+    await loadScript('https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js','upscaler-js');
+    if(typeof window.Upscaler!=='function') throw new Error('Upscaler本体が読み込めません');
+    const model=window[mdl.global];
+    if(!model) throw new Error('ESRGANモデル('+mdl.global+')が読み込めません');
+
     const t0=performance.now();
     const imgEl=await loadImage(beforeURL);
     const W=imgEl.naturalWidth,H=imgEl.naturalHeight;
     document.getElementById('origSize').textContent=`${W} × ${H} px`;
-    setProgress(20,'ESRGAN 推論中（2x）...');
-    setLog('🔬 ESRGAN 超解像処理中（モデルは2x固定）...','warn');
-    const upscaler=new window.Upscaler();
-    const result=await upscaler.upscale(imgEl,{
-      patchSize:48,padding:2,
-      progress:p=>setProgress(20+Math.round(p*45),`ESRGAN ${Math.round(p*100)}%`)
-    });
-    const aiImg=await loadImage(typeof result==='string'?result:(result instanceof HTMLCanvasElement?result.toDataURL('image/png'):''));
-    const aW=aiImg.naturalWidth,aH=aiImg.naturalHeight;
-    // 目標倍率に合わせて（必要なら）Lanczosで調整＋シャープ。iOS上限も適用
+
+    // iOS等のCanvas上限内に収まるよう、必要なら入力を事前縮小（AI出力=入力×scale）
     const {oW,oH,capped}=safeSize(W,H,scale);
-    if(capped) setLog(`⚠️ 出力を ${oW}×${oH}px に自動調整しました（端末上限対策）`,'warn');
+    let inputEl=imgEl, inW=W, inH=H;
+    const needInW=Math.round(oW/scale), needInH=Math.round(oH/scale);
+    if(needInW<W||needInH<H){
+      const dc=makeCanvas(needInW,needInH), dx=dc.getContext('2d');
+      dx.imageSmoothingEnabled=true; dx.imageSmoothingQuality='high';
+      dx.drawImage(imgEl,0,0,needInW,needInH);
+      inputEl=await loadImage(dc.toDataURL('image/png')); inW=needInW; inH=needInH;
+      if(capped) setLog(`⚠️ 端末上限のため入力を ${inW}×${inH}px に縮小してAI処理します（出力 ${oW}×${oH}px）`,'warn');
+    }
+
+    setProgress(20,`ESRGAN 推論中（×${scale}）...`);
+    setLog(`🔬 ESRGAN超解像中（モデル: esrgan-slim ×${scale}）...`,'warn');
+    const upscaler=new window.Upscaler({ model });
+    const result=await upscaler.upscale(inputEl,{
+      patchSize:48,padding:2,output:'base64',
+      progress:p=>setProgress(20+Math.round(p*62),`ESRGAN ${Math.round(p*100)}%`)
+    });
+    const aiSrc=typeof result==='string'?result:(result&&result.toDataURL?result.toDataURL('image/png'):'');
+    if(!aiSrc) throw new Error('AI出力の取得に失敗');
+    const aiImg=await loadImage(aiSrc);
+    const aW=aiImg.naturalWidth,aH=aiImg.naturalHeight;
+
+    // 仕上げのアンシャープ（Workerで・同寸）。ESRGANは既に精細なので控えめに。
     const ac=makeCanvas(aW,aH);
     ac.getContext('2d',{willReadFrequently:true}).drawImage(aiImg,0,0);
     const adata=ac.getContext('2d').getImageData(0,0,aW,aH);
-    setProgress(68, (aW!==oW||aH!==oH)?'目標倍率へ調整＋シャープ中...':'シャープ仕上げ中...');
-    const res=await runPipeline(
-      {buf:adata.data.buffer,W:aW,H:aH,oW,oH,denoise:0,sharp:sharpAmt*0.6,a:3},
-      pct=>setProgress(68+Math.round(pct*0.30), `仕上げ ${pct}%`)
-    );
-    const out=makeCanvas(res.oW,res.oH);
-    out.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(res.buf),res.oW,res.oH),0,0);
+    setProgress(84,'シャープ仕上げ中...');
+    let outBuf=adata.data.buffer, foW=aW, foH=aH;
+    if(sharpAmt>0){
+      const res=await runPipeline(
+        {buf:adata.data.buffer,W:aW,H:aH,oW:aW,oH:aH,denoise:0,sharp:sharpAmt*0.5,a:3},
+        pct=>setProgress(84+Math.round(pct*0.14),`仕上げ ${pct}%`)
+      );
+      outBuf=res.buf; foW=res.oW; foH=res.oH;
+    }
+    const out=makeCanvas(foW,foH);
+    out.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(outBuf),foW,foH),0,0);
     const ext=fmt==='image/jpeg'?'jpg':fmt==='image/webp'?'webp':'png';
     const blob=await toBlobP(out,fmt,fmt==='image/png'?undefined:0.95);
     const elapsed=((performance.now()-t0)/1000).toFixed(1);
     setProgress(100,'完了！');
-    applyResult(blob,res.oW,res.oH,elapsed,ext,'AI ESRGAN→Lanczos');
+    applyResult(blob,foW,foH,elapsed,ext,`AI ESRGAN-slim ×${scale}`);
   }catch(e){
     console.warn('AI失敗:',e.message);
     setLog(`⚠️ AIモード失敗（${e.message}）→ Canvasモードで代替処理`,'warn');
