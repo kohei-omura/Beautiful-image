@@ -188,7 +188,11 @@
     </div>
   </div>
 
-  <button class="btn-process" id="btnProcess" disabled>🚀 高画質化 START</button>
+  <button class="btn-process" id="btnAuto" style="background:linear-gradient(125deg,var(--accent3),var(--accent2))" disabled>🪄 おまかせ画質（端末に最適化して自動実行）</button>
+  <button class="btn-process" id="btnProcess" disabled>🚀 高画質化 START（手動設定）</button>
+  <div style="text-align:right;margin-top:6px">
+    <button id="btnResetLearn" style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;text-decoration:underline">🧹 おまかせ学習をリセット</button>
+  </div>
 
   <div class="progress-wrap" id="progressWrap">
     <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
@@ -215,6 +219,7 @@
       <div class="info-chip">処理時間: <span id="procTime">—</span></div>
       <div class="info-chip">モード: <span id="modeUsed">—</span></div>
     </div>
+    <div id="learnInfo" style="margin-top:10px;padding:9px 12px;border:1px dashed var(--border);border-radius:8px;font-size:.7rem;color:var(--muted);line-height:1.8"></div>
     <a class="btn-download" id="btnDownload" href="#" download="enhanced.png">⬇ ダウンロード</a>
   </div>
 </main>
@@ -225,6 +230,39 @@ let originalFile = null;
 let currentMode = 'canvas';
 let beforeURL = null;   // ObjectURL（before表示用）
 let afterURL  = null;   // ObjectURL（after/ダウンロード用）
+
+/* ====== 端末ごとの学習（localStorage） ======
+   GPUクラッシュ(白画面)はJSが動けないため、AI実行直前にbreadcrumbを保存し
+   正常終了時に消す。次回起動時に残っていれば「前回未完走＝危険」と判断して上限を下げる。
+   スキーマ: { aiCrashPx(0=無), aiSafePx(0=無), attempt(null|{inPx,scale,ts}), crashes, history[] } */
+const LS_KEY='aie_learn_v1';
+function lsLoad(){ try{ return JSON.parse(localStorage.getItem(LS_KEY))||{}; }catch(_){ return {}; } }
+function lsSave(){ try{ localStorage.setItem(LS_KEY, JSON.stringify(learn)); }catch(_){} }
+let learn = lsLoad();
+function aiCapFromLearn(){ return (learn.aiCrashPx>0) ? Math.floor(learn.aiCrashPx*0.85) : Infinity; }
+function recordOutcome(ok, inPx, scale, sec){
+  if(ok){
+    learn.aiSafePx=Math.max(learn.aiSafePx||0, inPx);
+    if(sec>40){ learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, inPx) : Math.round(inPx*1.25); } // 遅すぎ→上限化
+  }else if(inPx>0){
+    learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, inPx) : inPx;
+  }
+  (learn.history=learn.history||[]).push({ok,inPx,scale,sec,ts:Date.now()});
+  if(learn.history.length>20) learn.history=learn.history.slice(-20);
+  lsSave();
+}
+let _crashNotePx=0;
+function initLearn(){
+  if(learn.attempt && learn.attempt.inPx){            // 前回AIが完走せず終了＝クラッシュ/中断
+    const px=learn.attempt.inPx;
+    learn.aiCrashPx = learn.aiCrashPx>0 ? Math.min(learn.aiCrashPx, px) : px;
+    learn.crashes=(learn.crashes||0)+1;
+    learn.attempt=null; lsSave();
+    _crashNotePx=px;
+  }
+}
+initLearn();
+if(_crashNotePx){ setTimeout(()=>setLog(`⚠️ 前回のAI処理が完了しませんでした。おまかせの安全上限を約${Math.round(_crashNotePx/1000)}k pxに自動調整しました。`,'warn'),0); }
 
 function selectMode(mode) {
   currentMode = mode;
@@ -253,6 +291,7 @@ function handleFile(file) {
   document.getElementById('imgBefore').src = beforeURL;
   document.getElementById('resultSection').classList.remove('show');
   document.getElementById('btnProcess').disabled = false;
+  document.getElementById('btnAuto').disabled = false;
   setLog(`✅ ${file.name}（${(file.size/1024).toFixed(0)} KB）読み込み完了`,'success');
 }
 
@@ -417,9 +456,10 @@ function runPipeline(d,onPct){
 }
 
 /* ====== Main Process ====== */
-document.getElementById('btnProcess').addEventListener('click',async()=>{
+async function runEnhance(){
   if(!originalFile)return;
   document.getElementById('btnProcess').disabled=true;
+  document.getElementById('btnAuto').disabled=true;
   document.getElementById('progressWrap').classList.add('show');
   document.getElementById('resultSection').classList.remove('show');
   setProgress(0,'準備中...');
@@ -436,9 +476,68 @@ document.getElementById('btnProcess').addEventListener('click',async()=>{
     setProgress(0,'エラー');
   }finally{
     document.getElementById('btnProcess').disabled=false;
+    document.getElementById('btnAuto').disabled=false;
     document.getElementById('progressWrap').classList.remove('show');
   }
+}
+document.getElementById('btnProcess').addEventListener('click',()=>{ lastDecision='手動設定'; runEnhance(); });
+document.getElementById('btnAuto').addEventListener('click',autoEnhance);
+document.getElementById('btnResetLearn').addEventListener('click',()=>{
+  learn={}; lsSave();
+  setLog('🧹 おまかせの学習データをリセットしました（次回から初期判定に戻ります）','success');
 });
+
+/* ====== おまかせ画質（端末性能＋画像サイズで自動設定） ====== */
+function deviceProfile(){
+  const ua=navigator.userAgent||'';
+  const iOS=/iP(hone|od|ad)/.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+  const mobile=iOS || /Android|Mobile/i.test(ua) || (window.matchMedia && matchMedia('(pointer:coarse)').matches);
+  let webgl=false; try{const c=document.createElement('canvas'); webgl=!!(c.getContext('webgl2')||c.getContext('webgl'));}catch(_){}
+  const mem=navigator.deviceMemory||0; // GB（iOSはundefined→0）
+  return {iOS,mobile,webgl,mem};
+}
+function autoDecide(W,H){
+  const {iOS,mobile,webgl,mem}=deviceProfile();
+  const px=W*H;
+  // AIを許可する入力px上限（WebGL必須・モバイルは保守的・高メモリPCは緩め）＋学習で得た安全上限
+  const heuristicCap = !webgl ? 0 : mobile ? 600000 : (mem>=8 ? 1600000 : 1000000);
+  const aiCapPx = Math.min(heuristicCap, aiCapFromLearn());
+  let mode,scale,sharp,denoise,reason;
+  if(px>0 && px<=aiCapPx){
+    mode='ai'; sharp=1.0; denoise=0;
+    if(px<=160000) scale=4;        // ≲400×400
+    else if(px<=400000) scale=3;   // ≲630×630
+    else scale=2;
+    if(mobile) scale=Math.min(scale,2);          // モバイルは×2上限で安全側
+    reason=`AIモード ×${scale}（ESRGAN）— 入力 ${W}×${H}px・${mobile?'モバイル安全設定':'PC設定'}`;
+  }else{
+    mode='canvas'; sharp=1.5; denoise=1;
+    scale = px<=500000 ? 4 : 2;                  // 小さければ×4、大きければ×2
+    reason = !webgl
+      ? `Canvasモード ×${scale}（WebGL非対応のためAIは不使用・確実動作）`
+      : (aiCapFromLearn()<heuristicCap
+          ? `Canvasモード ×${scale}（学習: この端末はAIで負荷大のため安全側・確実動作）`
+          : `Canvasモード ×${scale}（入力 ${W}×${H}px が大きめ → 高速・無クラッシュ優先）`);
+  }
+  if(isFinite(aiCapFromLearn())) reason += `（学習上限≈${Math.round(aiCapFromLearn()/1000)}k px）`;
+  return {mode,scale,sharp,denoise,reason};
+}
+async function autoEnhance(){
+  if(!originalFile){setLog('先に画像を選択してください','warn');return;}
+  let W=0,H=0;
+  try{const im=await loadImage(beforeURL); W=im.naturalWidth; H=im.naturalHeight;}catch(_){}
+  const d=autoDecide(W,H);
+  // 選んだ設定をUIへ反映（ユーザーにも見えるように）
+  document.getElementById('scaleSelect').value=String(d.scale);
+  document.getElementById('sharpAmt').value=String(d.sharp);
+  document.getElementById('sharpVal').textContent=String(d.sharp);
+  document.getElementById('denoiseSelect').value=String(d.denoise);
+  selectMode(d.mode);
+  lastDecision = `おまかせ → ${d.reason}`;
+  setLog(`🪄 おまかせ判定 → ${d.reason}`,'success');
+  await delay(300);
+  await runEnhance();
+}
 
 /* ====== Canvas Mode ====== */
 async function processCanvas(scale,sharpAmt,denoiseLv,fmt){
@@ -483,10 +582,10 @@ const AI_MODELS = {
 async function processAI(scale,sharpAmt,denoiseLv,fmt){
   setProgress(4,'TensorFlow.js 読み込み中...');
   setLog('⚙️ AI ライブラリ読み込み中（初回はモデルのDLに時間がかかります）...','warn');
+  let upscaler=null, attemptPx=0;        // attemptPx: 学習記録用の実処理入力px
   try{
     if(!navigator.onLine) throw new Error('オフライン（AIモードはネット接続が必要）');
     const mdl=AI_MODELS[scale]||AI_MODELS[4];
-    // 1) TensorFlow.js → 2) モデル → 3) UpscalerJS本体 の順で読み込む
     await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js','tf-js');
     setProgress(9,'ESRGANモデル読み込み中...');
     await loadScript(`https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/${mdl.file}`,'esrgan-'+scale);
@@ -496,28 +595,51 @@ async function processAI(scale,sharpAmt,denoiseLv,fmt){
     const model=window[mdl.global];
     if(!model) throw new Error('ESRGANモデル('+mdl.global+')が読み込めません');
 
+    // ── GPUメモリ枯渇（白画面クラッシュ）対策 ──
+    if(window.tf){
+      try{
+        // float16テクスチャでVRAM半減、使用後テクスチャを即時解放
+        tf.env().set('WEBGL_FORCE_F16_TEXTURES', true);
+        tf.env().set('WEBGL_DELETE_TEXTURE_THRESHOLD', 0);
+        // 前回クラッシュ等で壊れたバックエンドを再初期化（再処理失敗対策）
+        await tf.ready();
+        if(tf.getBackend()!=='webgl'){ await tf.setBackend('webgl'); }
+        await tf.ready();
+      }catch(_){}
+    }
+
     const t0=performance.now();
     const imgEl=await loadImage(beforeURL);
     const W=imgEl.naturalWidth,H=imgEl.naturalHeight;
     document.getElementById('origSize').textContent=`${W} × ${H} px`;
 
-    // iOS等のCanvas上限内に収まるよう、必要なら入力を事前縮小（AI出力=入力×scale）
-    const {oW,oH,capped}=safeSize(W,H,scale);
+    // 出力はCanvas上限内、かつ入力はGPU安全枠内に事前縮小（学習で得た上限も適用）
+    const AI_MAX_INPUT_PX = Math.min(1000000, aiCapFromLearn());   // 学習でこの端末の安全上限を反映
+    const {oW,oH}=safeSize(W,H,scale);
+    let needInW=Math.round(oW/scale), needInH=Math.round(oH/scale);
+    const inPx=needInW*needInH;
+    if(inPx>AI_MAX_INPUT_PX){
+      const g=Math.sqrt(AI_MAX_INPUT_PX/inPx);
+      needInW=Math.max(1,Math.floor(needInW*g));
+      needInH=Math.max(1,Math.floor(needInH*g));
+    }
     let inputEl=imgEl, inW=W, inH=H;
-    const needInW=Math.round(oW/scale), needInH=Math.round(oH/scale);
     if(needInW<W||needInH<H){
       const dc=makeCanvas(needInW,needInH), dx=dc.getContext('2d');
       dx.imageSmoothingEnabled=true; dx.imageSmoothingQuality='high';
       dx.drawImage(imgEl,0,0,needInW,needInH);
       inputEl=await loadImage(dc.toDataURL('image/png')); inW=needInW; inH=needInH;
-      if(capped) setLog(`⚠️ 端末上限のため入力を ${inW}×${inH}px に縮小してAI処理します（出力 ${oW}×${oH}px）`,'warn');
+      setLog(`ℹ️ メモリ安全化のため入力を ${inW}×${inH}px に調整（出力 ${inW*scale}×${inH*scale}px）`,'warn');
     }
+    attemptPx=inW*inH;
 
     setProgress(20,`ESRGAN 推論中（×${scale}）...`);
-    setLog(`🔬 ESRGAN超解像中（モデル: esrgan-slim ×${scale}）...`,'warn');
-    const upscaler=new window.Upscaler({ model });
+    setLog(`🔬 ESRGAN超解像中（esrgan-slim ×${scale} / 小パッチ処理）...`,'warn');
+    // クラッシュ検知用 breadcrumb（白画面で落ちても残る→次回起動時に検知）
+    learn.attempt={inPx:attemptPx,scale,ts:Date.now()}; lsSave();
+    upscaler=new window.Upscaler({ model });
     const result=await upscaler.upscale(inputEl,{
-      patchSize:48,padding:2,output:'base64',
+      patchSize:32, padding:2, output:'base64',   // 小パッチでピークVRAMを抑制
       progress:p=>setProgress(20+Math.round(p*62),`ESRGAN ${Math.round(p*100)}%`)
     });
     const aiSrc=typeof result==='string'?result:(result&&result.toDataURL?result.toDataURL('image/png'):'');
@@ -525,7 +647,7 @@ async function processAI(scale,sharpAmt,denoiseLv,fmt){
     const aiImg=await loadImage(aiSrc);
     const aW=aiImg.naturalWidth,aH=aiImg.naturalHeight;
 
-    // 仕上げのアンシャープ（Workerで・同寸）。ESRGANは既に精細なので控えめに。
+    // 仕上げのアンシャープ（Workerで・同寸・GPU不使用）
     const ac=makeCanvas(aW,aH);
     ac.getContext('2d',{willReadFrequently:true}).drawImage(aiImg,0,0);
     const adata=ac.getContext('2d').getImageData(0,0,aW,aH);
@@ -544,16 +666,36 @@ async function processAI(scale,sharpAmt,denoiseLv,fmt){
     const blob=await toBlobP(out,fmt,fmt==='image/png'?undefined:0.95);
     const elapsed=((performance.now()-t0)/1000).toFixed(1);
     setProgress(100,'完了！');
+    recordOutcome(true, attemptPx, scale, parseFloat(elapsed));   // 学習: 成功＋所要時間
     applyResult(blob,foW,foH,elapsed,ext,`AI ESRGAN-slim ×${scale}`);
   }catch(e){
     console.warn('AI失敗:',e.message);
+    recordOutcome(false, attemptPx, scale, 0);                    // 学習: 失敗→上限を下げる
     setLog(`⚠️ AIモード失敗（${e.message}）→ Canvasモードで代替処理`,'warn');
     await delay(500);
     await processCanvas(scale,sharpAmt,denoiseLv,fmt);
+  }finally{
+    // breadcrumbを消す（消えていなければ＝白画面クラッシュ。次回起動時に検知される）
+    learn.attempt=null; lsSave();
+    // モデル・テンソルを確実に解放し、次回の再処理を成功させる
+    try{ if(upscaler&&upscaler.dispose) await upscaler.dispose(); }catch(_){}
+    try{ if(window.tf&&tf.disposeVariables) tf.disposeVariables(); }catch(_){}
   }
 }
 
 /* ====== Result ====== */
+let lastDecision='手動設定';
+function fmtPx(p){ if(!(p>0)||!isFinite(p))return '—'; return p>=1e6?(p/1e6).toFixed(2)+'M px':Math.round(p/1000)+'k px'; }
+function renderLearnInfo(){
+  const el=document.getElementById('learnInfo'); if(!el)return;
+  const cap=aiCapFromLearn();
+  el.innerHTML =
+    `🧭 判定根拠: <span style="color:var(--accent)">${lastDecision}</span><br>`+
+    `🧠 学習状況: AI安全上限 <b style="color:var(--accent3)">${isFinite(cap)?fmtPx(cap):'制限なし'}</b>`+
+    ` ／ 成功実績 <b style="color:var(--accent3)">${fmtPx(learn.aiSafePx||0)}</b>`+
+    ` ／ クラッシュ <b style="color:#f87171">${learn.crashes||0}</b> 回`+
+    ` ／ 記録 ${learn.history?learn.history.length:0} 件`;
+}
 function applyResult(blob,oW,oH,elapsed,ext,modeName){
   if(afterURL) URL.revokeObjectURL(afterURL);
   afterURL=URL.createObjectURL(blob);
@@ -566,6 +708,7 @@ function applyResult(blob,oW,oH,elapsed,ext,modeName){
   dl.href=afterURL; dl.download='enhanced.'+ext;
   document.getElementById('resultSection').classList.add('show');
   setupComparison();
+  renderLearnInfo();
   setLog(`✅ 完了！ ${elapsed}秒 / 出力: ${oW}×${oH}px / ${(blob.size/1024).toFixed(0)} KB`,'success');
 }
 
