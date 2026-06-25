@@ -1,0 +1,18 @@
+{
+  "name": "AI Image Enhancer — 超解像 & ぼかし除去",
+  "short_name": "AI Enhancer",
+  "description": "ブラウザ完結の画像高画質化。分離型Lanczos-3超解像・アンシャープ・ノイズ除去。Canvasモードは完全オフライン対応。",
+  "lang": "ja",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#060a10",
+  "theme_color": "#060a10",
+  "categories": ["photo", "utilities", "graphics"],
+  "icons": [
+    { "src": "enh-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "enh-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "enh-icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
