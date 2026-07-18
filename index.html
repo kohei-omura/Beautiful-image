@@ -220,7 +220,8 @@
       <div class="info-chip">モード: <span id="modeUsed">—</span></div>
     </div>
     <div id="learnInfo" style="margin-top:10px;padding:9px 12px;border:1px dashed var(--border);border-radius:8px;font-size:.7rem;color:var(--muted);line-height:1.8"></div>
-    <a class="btn-download" id="btnDownload" href="#" download="enhanced.png">⬇ ダウンロード</a>
+    <button class="btn-download" id="btnDownload" type="button">⬇ 画像を保存</button>
+    <button class="btn-download" id="btnSaveCompare" type="button" style="margin-left:8px">📊 比較画像を保存</button>
   </div>
 </main>
 
@@ -307,7 +308,37 @@ function loadImage(src){
 }
 function toBlobP(canvas,type,q){return new Promise((res,rej)=>canvas.toBlob(b=>b?res(b):rej(new Error('出力生成に失敗（サイズ超過の可能性）')),type,q));}
 function delay(ms){return new Promise(r=>setTimeout(r,ms))}
-function loadScript(src,id){
+/* ====== スクリプト読込（Cache Storage 優先） ======
+   改良A: 2回目以降のAIモード起動を高速化する。
+   tf.min.js(約1.1MB) + upscaler.min.js(約50KB) + モデル定義(1.4KB) の計約1.2MBを
+   Cache Storage に保存し、次回以降はネットを介さず即座に実行する。
+   sw.js は変更せず window 側だけで完結させている。
+   注意: モデル重み(models/xN/*.bin 約900KB)は UpscalerJS が内部で fetch するため
+   ここは通らない。重みは従来どおりブラウザのHTTPキャッシュに任せる。 */
+const AIE_CACHE='ai-enhancer-models-v1';
+function _runScript(text,id){
+  const s=document.createElement('script');
+  s.id=id; s.textContent=text;
+  document.head.appendChild(s);
+}
+async function loadScript(src,id){
+  if(document.getElementById(id)) return;
+  // ① Cache Storage にあれば通信せず実行
+  if(window.caches){
+    try{
+      const c=await caches.open(AIE_CACHE);
+      const hit=await c.match(src);
+      if(hit){ _runScript(await hit.text(), id); return; }
+      // ② 無ければ取得 → 本文をキャッシュしてから実行
+      const res=await fetch(src);
+      if(res && res.ok){
+        try{ await c.put(src, res.clone()); }catch(_){}
+        _runScript(await res.text(), id);
+        return;
+      }
+    }catch(_){ /* Cache Storage 不可の環境は下の従来方式へ */ }
+  }
+  // ③ 従来方式（Cache Storage 非対応・CORS失敗時のフォールバック）
   return new Promise((res,rej)=>{
     if(document.getElementById(id)){res();return}
     const s=document.createElement('script');s.id=id;s.src=src;
@@ -480,6 +511,43 @@ async function runEnhance(){
     document.getElementById('progressWrap').classList.remove('show');
   }
 }
+/* ====== 設定の記憶（改良B） ======
+   倍率・シャープ・ノイズ低減・出力形式を localStorage に保存し次回起動時に復元する。
+   「おまかせ画質」の自動判定ロジック自体は不変で、手動変更した値だけを記憶する。 */
+const PREFS_KEY='aie_prefs';
+const PREF_IDS=['scaleSelect','sharpAmt','denoiseSelect','fmtSelect'];
+function savePrefs(){
+  try{
+    const o={};
+    PREF_IDS.forEach(id=>{ const e=document.getElementById(id); if(e) o[id]=e.value; });
+    localStorage.setItem(PREFS_KEY, JSON.stringify(o));
+  }catch(_){}
+}
+function loadPrefs(){
+  try{
+    const o=JSON.parse(localStorage.getItem(PREFS_KEY)||'{}');
+    PREF_IDS.forEach(id=>{
+      const e=document.getElementById(id);
+      if(e && o[id]!==undefined && o[id]!==null) e.value=o[id];
+    });
+    const s=document.getElementById('sharpVal'), r=document.getElementById('sharpAmt');
+    if(s&&r) s.textContent=r.value;   // スライダーの数値表示も復元
+  }catch(_){}
+}
+loadPrefs();
+PREF_IDS.forEach(id=>{
+  const e=document.getElementById(id);
+  if(e) e.addEventListener('change', savePrefs);
+});
+
+// 保存ボタン（クリックハンドラ内では非同期処理を挟まない）
+document.getElementById('btnDownload').addEventListener('click',function(){
+  saveFileSync(this, currentFile, afterURL, currentExt, '画像を長押しして「写真に保存」を選んでください');
+});
+document.getElementById('btnSaveCompare').addEventListener('click',function(){
+  saveFileSync(this, compareFile, compareURL, 'png', '比較画像を長押しして「写真に保存」を選んでください');
+});
+
 document.getElementById('btnProcess').addEventListener('click',()=>{ lastDecision='手動設定'; runEnhance(); });
 document.getElementById('btnAuto').addEventListener('click',autoEnhance);
 document.getElementById('btnResetLearn').addEventListener('click',()=>{
@@ -573,24 +641,37 @@ async function processCanvas(scale,sharpAmt,denoiseLv,fmt){
 
 /* ====== AI Mode ======
    重要: UpscalerJSをUMD(スクリプトタグ)で使う場合、モデルパッケージを必ず別途読み込み
-   new Upscaler({model}) で渡す必要がある。倍率に応じて esrgan-slim の対応モデルを使用。 */
+   new Upscaler({model}) で渡す必要がある。倍率に応じて esrgan-slim の対応モデルを使用。
+
+   バージョン固定日 2026-07-16 ／ @latest 禁止（beta削除で404障害が起きたため）
+   esrgan-slim の旧betaがnpmから削除され、@latest（=1.0.0）はパス構造が変更された。
+   旧: /dist/umd/2x.min.js                                        → 404
+   新: /dist/umd/models/esrgan-slim/src/x2/index.min.js           → 200
+   下記URLはすべて 2026-07-16 に HTTP 200 を実地確認済み。@latest には戻さないこと。
+   UMDグローバル名（ESRGANSlim2x/3x/4x）は 1.0.0 でも不変なことを確認済み。 */
+const CDN_TFJS     = 'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js';
+const CDN_UPSCALER = 'https://cdn.jsdelivr.net/npm/upscaler@1.0.0/dist/browser/umd/upscaler.min.js';
+const CDN_ESRGAN   = 'https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@1.0.0/dist/umd/models/esrgan-slim/src/';
 const AI_MODELS = {
-  2: { file:'2x.min.js', global:'ESRGANSlim2x' },
-  3: { file:'3x.min.js', global:'ESRGANSlim3x' },
-  4: { file:'4x.min.js', global:'ESRGANSlim4x' },
+  2: { file:'x2/index.min.js', global:'ESRGANSlim2x' },
+  3: { file:'x3/index.min.js', global:'ESRGANSlim3x' },
+  4: { file:'x4/index.min.js', global:'ESRGANSlim4x' },
 };
 async function processAI(scale,sharpAmt,denoiseLv,fmt){
   setProgress(4,'TensorFlow.js 読み込み中...');
   setLog('⚙️ AI ライブラリ読み込み中（初回はモデルのDLに時間がかかります）...','warn');
   let upscaler=null, attemptPx=0;        // attemptPx: 学習記録用の実処理入力px
   try{
+    // 案A: オフライン判定は残す。スクリプトはCache Storageから復元できるが、
+    // モデル重み(約900KB)はUpscalerJSが内部fetchするためCache Storageの対象外で、
+    // ブラウザHTTPキャッシュ頼み。オフラインでは途中で失敗しうるため明示的に拒否する。
     if(!navigator.onLine) throw new Error('オフライン（AIモードはネット接続が必要）');
     const mdl=AI_MODELS[scale]||AI_MODELS[4];
-    await loadScript('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js','tf-js');
+    await loadScript(CDN_TFJS,'tf-js');
     setProgress(9,'ESRGANモデル読み込み中...');
-    await loadScript(`https://cdn.jsdelivr.net/npm/@upscalerjs/esrgan-slim@latest/dist/umd/${mdl.file}`,'esrgan-'+scale);
+    await loadScript(CDN_ESRGAN+mdl.file,'esrgan-'+scale);
     setProgress(14,'UpscalerJS 読み込み中...');
-    await loadScript('https://cdn.jsdelivr.net/npm/upscaler@latest/dist/browser/umd/upscaler.min.js','upscaler-js');
+    await loadScript(CDN_UPSCALER,'upscaler-js');
     if(typeof window.Upscaler!=='function') throw new Error('Upscaler本体が読み込めません');
     const model=window[mdl.global];
     if(!model) throw new Error('ESRGANモデル('+mdl.global+')が読み込めません');
@@ -696,20 +777,95 @@ function renderLearnInfo(){
     ` ／ クラッシュ <b style="color:#f87171">${learn.crashes||0}</b> 回`+
     ` ／ 記録 ${learn.history?learn.history.length:0} 件`;
 }
+/* ====== 保存（iOS PWA 対応） ======
+   欠陥2: ホーム画面起動のPWAでは <a download> が動作せず無反応になる。
+   対策: 処理完了時に File を事前生成しておき、クリックハンドラでは
+   非同期処理を一切挟まず同期的に navigator.share を呼ぶ（3段フォールバック）。
+     1. canShare({files}) が真 → share（共有シート「画像を保存」で写真アプリへ）
+     2. 非対応 → 従来の objectURL + a[download] を同期click
+     3. 最後の砦 → window.open(objectURL) ＋「長押しで保存」ヒント */
+let currentFile=null, currentExt='png', currentType='image/png';
+let compareFile=null, compareURL=null;
+
+function saveFileSync(btn, file, url, ext, hintMsg){
+  if(!file || !url){ setLog('保存対象がありません','warn'); return; }
+  // ① Web Share API（同期呼び出し。await/then を前に挟まない）
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    navigator.share({files:[file]}).catch(function(){});
+    return;
+  }
+  // ② a[download] を同期click
+  try{
+    const a=document.createElement('a');
+    a.href=url; a.download='enhanced.'+ext;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    return;
+  }catch(_){}
+  // ③ 新規タブで開いて長押し保存
+  window.open(url);
+  setLog(hintMsg||'画像を長押しして「写真に保存」を選んでください','warn');
+}
+
 function applyResult(blob,oW,oH,elapsed,ext,modeName){
   if(afterURL) URL.revokeObjectURL(afterURL);
   afterURL=URL.createObjectURL(blob);
+  // 保存ボタン用に File を事前生成（クリック時に非同期処理を挟まないため）
+  currentExt=ext; currentType=blob.type||'image/png';
+  try{ currentFile=new File([blob],'enhanced.'+ext,{type:currentType}); }catch(_){ currentFile=null; }
   const ia=document.getElementById('imgAfter');
   ia.src=afterURL;
   document.getElementById('outSize').textContent=`${oW} × ${oH} px`;
   document.getElementById('procTime').textContent=`${elapsed} 秒`;
   document.getElementById('modeUsed').textContent=modeName;
-  const dl=document.getElementById('btnDownload');
-  dl.href=afterURL; dl.download='enhanced.'+ext;
   document.getElementById('resultSection').classList.add('show');
   setupComparison();
   renderLearnInfo();
+  buildCompareImage(modeName);   // 比較画像も事前生成しておく
   setLog(`✅ 完了！ ${elapsed}秒 / 出力: ${oW}×${oH}px / ${(blob.size/1024).toFixed(0)} KB`,'success');
+}
+
+/* ====== 比較画像の書き出し（改良C） ======
+   元画像と処理後を横並びに合成（各上部に Before/After ラベル、間に2pxの区切り線、
+   下部に小クレジット）。iOS の Canvas 上限対策として長辺 2400px までに縮小して合成。 */
+async function buildCompareImage(modeName){
+  compareFile=null;
+  if(compareURL){ URL.revokeObjectURL(compareURL); compareURL=null; }
+  if(!beforeURL||!afterURL) return;
+  try{
+    const [ib,ia]=await Promise.all([loadImage(beforeURL), loadImage(afterURL)]);
+    const LAB=44, CRED=30, GAP=2, MAXW=2400;
+    // 高さを揃えてから横並びにする
+    let h=Math.max(ib.naturalHeight, ia.naturalHeight);
+    let wb=Math.round(ib.naturalWidth*(h/ib.naturalHeight));
+    let wa=Math.round(ia.naturalWidth*(h/ia.naturalHeight));
+    let W=wb+GAP+wa, H=h+LAB+CRED;
+    if(Math.max(W,H)>MAXW){                       // 長辺2400px上限（iOS canvas対策）
+      const f=MAXW/Math.max(W,H);
+      h=Math.round(h*f); wb=Math.round(wb*f); wa=Math.round(wa*f);
+      W=wb+GAP+wa; H=h+LAB+CRED;
+    }
+    const c=document.createElement('canvas'); c.width=W; c.height=H;
+    const g=c.getContext('2d');
+    g.fillStyle='#0a0e17'; g.fillRect(0,0,W,H);
+    g.imageSmoothingEnabled=true; g.imageSmoothingQuality='high';
+    g.drawImage(ib,0,LAB,wb,h);
+    g.drawImage(ia,wb+GAP,LAB,wa,h);
+    g.fillStyle='rgba(255,255,255,.25)'; g.fillRect(wb,LAB,GAP,h);   // 区切り線
+    const fs=Math.max(14,Math.round(W/54));
+    g.font=`700 ${fs}px -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif`;
+    g.textBaseline='middle';
+    g.fillStyle='#8b93a7'; g.textAlign='center';
+    g.fillText('Before', wb/2, LAB/2);
+    g.fillStyle='#00ff9d';
+    g.fillText('After',  wb+GAP+wa/2, LAB/2);
+    g.font=`400 ${Math.max(10,Math.round(fs*0.62))}px -apple-system,BlinkMacSystemFont,sans-serif`;
+    g.fillStyle='#5a627a';
+    const scale=document.getElementById('scaleSelect').value;
+    g.fillText(`AI Image Enhancer ×${scale}${modeName?'  ／  '+modeName:''}`, W/2, H-CRED/2);
+    const blob=await toBlobP(c,'image/png');
+    compareURL=URL.createObjectURL(blob);
+    try{ compareFile=new File([blob],'compare.png',{type:'image/png'}); }catch(_){ compareFile=null; }
+  }catch(e){ compareFile=null; }
 }
 
 /* ====== Comparison Slider（画像固定・クリップのみ移動） ====== */
